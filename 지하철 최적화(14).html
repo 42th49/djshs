@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>대전 지하철 최적 입지 시뮬레이터</title>
+
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap" rel="stylesheet">
+
+
+<style>
+body{
+  display: flex;
+  justify-content: center;   /* 가로 중앙 */
+  align-items: center;       /* 세로 중앙 */
+  flex-direction: column;
+
+  min-height: 100vh;
+  margin: 0;
+  background: #f4f6f8;
+  font-family: 'IBM Plex Sans KR', sans-serif;
+}
+
+h2{
+  margin-top: 0;
+  margin-bottom: 14px;
+}
+
+.container{
+  background: white;
+  padding: 24px 32px;
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+  width: 1040px;
+  text-align: center;
+}
+
+.panel{
+  margin: 12px 0;
+}
+
+canvas{
+  display: block;
+  margin: 16px auto;
+  border-radius: 10px;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+}
+
+/* 유동 인구 색 */
+#p1 { background-color: #ffcccc; }
+#p2 { background-color: #ffe0b3; }
+#p3 { background-color: #ffffcc; }
+#p4 { background-color: #ccffdd; }
+#p5 { background-color: #cce0ff; }
+
+/* 교통 소외 색 (톤만 약간 다르게) */
+#t1 { background-color: #ffdddd; }
+#t2 { background-color: #ffe8cc; }
+#t3 { background-color: #ffffdd; }
+#t4 { background-color: #ddffee; }
+#t5 { background-color: #dde8ff; }
+
+input[type="number"]{
+  border: none;
+  border-bottom: 2px solid #aaa;
+  background: transparent; 
+  padding:4px;
+  width:60px;
+  text-align:center;
+  margin: 0 6px;
+}
+</style>
+</head>
+
+<body>
+  <div class="container">
+    <h2>대전 지하철 역 최적 입지 시뮬레이터</h2>
+
+    <div class="panel">
+    <b>거리 계산 방식</b><br>
+    <label><input type="radio" name="dist" value="taxi" checked> 택시 거리</label>
+    <label><input type="radio" name="dist" value="square"> 제곱 거리</label>
+    </div>
+
+    <div class="panel">
+    <b>유동 인구 지수</b><br>
+    유성구 <input id="p1" type="number" value="5">
+    서구 <input id="p2" type="number" value="4">
+    중구 <input id="p3" type="number" value="3">
+    동구 <input id="p4" type="number" value="4">
+    대덕구 <input id="p5" type="number" value="5">
+    </div>
+
+    <div class="panel">
+    <b>교통 소외 지수</b><br>
+    유성구 <input id="t1" type="number" value="3">
+    서구 <input id="t2" type="number" value="2">
+    중구 <input id="t3" type="number" value="4">
+    동구 <input id="t4" type="number" value="5">
+    대덕구 <input id="t5" type="number" value="4">
+    </div>
+
+    <canvas id="map" width="400" height="400"></canvas>
+
+    <div class="panel">
+    지하철 역 개수 <input id="N" type="number" value="3">
+    최소 역 간 거리 <input id="minD" type="number" value="3">
+    <button onclick="run()">계산</button>
+    </div>
+  </div>
+</body>
+
+
+
+<script>
+const cell = 20;
+const size = 20;
+
+/* 반드시 기존에 사용하던 grid 그대로 유지 */
+const grid = [
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 5, 5, 5, 5, 5, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 5, 5, 5, 5, 5, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 5, 5, 5, 4, 0, 4, 4, 0, 0],
+    [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 5, 5, 4, 4, 0, 4, 4, 0, 0],
+    [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 5, 5, 4, 4, 4, 4, 0, 0, 0],
+    [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 5, 5, 5, 4, 4, 4, 0, 0, 0, 0],
+    [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 5, 4, 4, 4, 4, 4, 0, 0, 0, 0],
+    [0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 3, 4, 4, 4, 4, 0, 0, 0, 0, 0],
+    [0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 0, 0, 0, 0, 0],
+    [0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 4, 4, 0, 0, 0, 0, 0],
+    [0, 0, 1, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 1, 2, 2, 2, 0, 3, 3, 3, 4, 4, 4, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 2, 2, 2, 2, 0, 3, 3, 3, 4, 4, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 2, 2, 2, 2, 0, 3, 3, 3, 4, 4, 4, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 2, 2, 2, 0, 0, 3, 4, 4, 4, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 4, 4, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+];
+
+const colors = {
+  1:"#e99a9a", 2:"#f2c08a", 3:"#efe28a", 4:"#9ed3b2", 5:"#9bbbe3"
+};
+
+const cvs = document.getElementById("map");
+const ctx = cvs.getContext("2d");
+
+function distance(a,b,mode){
+  const dx = a.x-b.x, dy = a.y-b.y;
+  return mode==="taxi" ? Math.abs(dx)+Math.abs(dy) : dx*dx+dy*dy;
+}
+
+function drawBase(){
+  ctx.clearRect(0,0,400,400);
+  for(let y=0;y<size;y++){
+    for(let x=0;x<size;x++){
+      const v = grid[y][x];
+      if(v!==0){
+        ctx.fillStyle = colors[v];
+        ctx.fillRect(x*cell,y*cell,cell,cell);
+      }
+    }
+  }
+}
+
+/* 체인 정렬 */
+function orderStationsChain(stations, mode){
+  if(stations.length<=2) return stations.slice();
+  const used = new Array(stations.length).fill(false);
+  const chain=[stations[0]];
+  used[0]=true;
+
+  for(let k=1;k<stations.length;k++){
+    let best=-1, bestD=Infinity;
+    for(let i=0;i<stations.length;i++){
+      if(used[i]) continue;
+      const d = distance(chain[chain.length-1], stations[i], mode);
+      if(d<bestD){ bestD=d; best=i; }
+    }
+    used[best]=true;
+    chain.push(stations[best]);
+  }
+  return chain;
+}
+
+function ccw(a,b,c){
+  return (c.y-a.y)*(b.x-a.x) > (b.y-a.y)*(c.x-a.x);
+}
+
+function intersect(p1,p2,p3,p4){
+  return ccw(p1,p3,p4)!==ccw(p2,p3,p4)
+      && ccw(p1,p2,p3)!==ccw(p1,p2,p4);
+}
+
+function removeCrossings(chain){
+  let improved = true;
+
+  while(improved){
+    improved = false;
+
+    for(let i=0;i<chain.length-3;i++){
+      for(let j=i+2;j<chain.length-1;j++){
+        if(intersect(chain[i], chain[i+1], chain[j], chain[j+1])){
+          const reversed = chain.slice(i+1, j+1).reverse();
+          chain.splice(i+1, j-i, ...reversed);
+          improved = true;
+        }
+      }
+    }
+  }
+  return chain;
+}
+
+
+function drawStations(stations, mode){
+  const ordered = removeCrossings(
+    orderStationsChain(stations, mode)
+  );
+
+  ctx.strokeStyle="black";
+  ctx.lineWidth=1;
+
+  for(let i=0;i<ordered.length;i++){
+    const cx = ordered[i].x*cell + cell/2;
+    const cy = ordered[i].y*cell + cell/2;
+
+    ctx.beginPath();
+    ctx.arc(cx,cy,4,0,Math.PI*2);
+    ctx.fillStyle="black";
+    ctx.fill();
+
+    if(i>0){
+      ctx.beginPath();
+      ctx.moveTo(
+        ordered[i-1].x*cell + cell/2,
+        ordered[i-1].y*cell + cell/2
+      );
+      ctx.lineTo(cx,cy);
+      ctx.stroke();
+    }
+  }
+}
+
+function run(){
+  const pop = {
+    1:+p1.value,2:+p2.value,3:+p3.value,4:+p4.value,5:+p5.value
+  };
+  const trans = {
+    1:+t1.value,2:+t2.value,3:+t3.value,4:+t4.value,5:+t5.value
+  };
+
+  const mode = document.querySelector("input[name=dist]:checked").value;
+  const N = +document.getElementById("N").value;
+  const minD = +document.getElementById("minD").value;
+
+  let stations=[];
+
+  for(let k=0;k<N;k++){
+    let best=null, bestCost=Infinity;
+
+    for(let y=0;y<size;y++){
+      for(let x=0;x<size;x++){
+        if(grid[y][x]===0) continue;
+        if(stations.some(s=>distance(s,{x,y},"taxi")<minD)) continue;
+
+        let cost=0;
+        for(let yy=0;yy<size;yy++){
+          for(let xx=0;xx<size;xx++){
+            if(grid[yy][xx]===0) continue;
+
+            let d = distance({x,y},{x:xx,y:yy},mode);
+            for(let s of stations){
+              d = Math.min(d, distance(s,{x:xx,y:yy},mode));
+            }
+
+            const w = pop[grid[yy][xx]] + trans[grid[yy][xx]];
+            cost += w * d;
+          }
+        }
+
+        if(cost < bestCost){
+          bestCost = cost;
+          best = {x,y};
+        }
+      }
+    }
+    if(best) stations.push(best);
+  }
+
+  drawBase();
+  drawStations(stations, mode);
+}
+
+drawBase();
+</script>
+
+</body>
+</html>
